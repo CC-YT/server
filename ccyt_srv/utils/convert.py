@@ -40,10 +40,9 @@ def parse_video(path, width: int, height: int, fps: int, output_dir):
         "-loglevel", "error",
         "-i", path,
         "-vf", f"scale={width}:{height}:flags=lanczos,fps={fps}",
-        os.path.join(output_dir,"out_%05d.png")
+        str(output_dir /"out_%05d.png")
     ])
 
-    au_path = os.path.join(output_dir,"audio.wav")
     subprocess.run([
         "ffmpeg",
         "-y",
@@ -51,13 +50,15 @@ def parse_video(path, width: int, height: int, fps: int, output_dir):
         "-i", path,
         "-ac", "1", #dfpwm only supports 1 audio channel
         "-ar", "48000", #dfpwm also likes a 48kHz sample rate
-        au_path
+        str(output_dir / "audio.wav")
     ])
-    data, sample_rate = sf.read(au_path)
+    data, sample_rate = sf.read(output_dir / "audio.wav")
     dfpwm_bytes = df.compressor(data)
 
-    with open(os.path.join(output_dir,"audio.dfpwm"), "wb") as out:
+    with open(str(output_dir / "audio.dfpwm"), "wb") as out:
         out.write(dfpwm_bytes)
+
+    return sorted(f for f in os.listdir(output_dir) if f.endswith(".png"))
 
 def convert_img(path):
     img = Image.open(path).convert("RGB")

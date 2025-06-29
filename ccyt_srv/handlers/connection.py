@@ -17,17 +17,17 @@ class ConnectionState:
         self.height = height
         self.fps = fps
 
+        self.video_file = None
+        self.frame_files = None
         self.f_chunk = settings["frame_chunk_size"]
-        self.frame_files = sorted(f for f in os.listdir(self.tmpdir) if f.endswith(".png"))
 
         self.frame_queue = asyncio.Queue(maxsize=settings["max_queue"]*self.f_chunk)
-        self.frame_idx = 0
 
+        self.audio_path = tmpdir / "audio.dfpwm"
         self.a_chunk = settings["audio_chunk_size"]
-        self.audio_path = os.path.join(self.tmpdir, "audio.dfpwm")
         self.audio_offset = 0
 
-from ccyt_srv.handlers.protocol import handle_init, handle_get_frames, handle_get_audio
+from ccyt_srv.handlers.protocol import handle_init, handle_get_media, handle_get_frames, handle_get_audio
 
 async def handle_connection(
     websocket: ServerConnection,
@@ -55,6 +55,8 @@ async def handle_connection(
                     await handle_get_frames(websocket, state)
                 case "get_audio":
                     await handle_get_audio(websocket, state)
+                case "get_media":
+                    await handle_get_media(websocket, data, state, settings)
                 case _:
                     logger.warning(f"Unknown message type: {data.get('type')}")
     except ConnectionClosedOK:

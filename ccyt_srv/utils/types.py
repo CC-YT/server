@@ -12,4 +12,8 @@ class GetFramesMsg(TypedDict):
 class GetAudioMsg(TypedDict):
     type: Literal["get_audio"]
 
-Message = InitMsg | GetFramesMsg | GetAudioMsg
+class GetMediaMsg(TypedDict):
+    type: Literal["get_media"]
+    url: str
+
+Message = InitMsg | GetFramesMsg | GetAudioMsg | GetMediaMsg

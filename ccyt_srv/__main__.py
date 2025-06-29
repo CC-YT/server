@@ -6,13 +6,10 @@ from websockets.asyncio.server import serve
 from ccyt_srv.handlers.connection import handle_connection
 
 def parse_args():
+    """
+    Parse optional commandline arguments
+    """
     parser = argparse.ArgumentParser(description="CC:Tweaked Video Player Server")
-    parser.add_argument(
-        "--video-file", "-v",
-        type=Path,
-        required=True,
-        help="Path to the video file to stream"
-    )
     parser.add_argument(
         "--host",
         type=str,
@@ -50,6 +47,9 @@ def setup_logging(level: str):
     )
 
 def load_config(path: Path) -> dict:
+    """
+    Find and load a config.yaml
+    """
     if not path.exists():
         logging.warning(f"Config file {path} is not found, using default settings")
         return { }
@@ -57,7 +57,11 @@ def load_config(path: Path) -> dict:
         return yaml.safe_load(f) or { }
 
 def merge_settings(config: dict, args: argparse.Namespace) -> dict:
-    """"""
+    """
+    Merge settings from config.yaml (if it exists), and commandline args
+
+    If neither are present, safe defaults are selected
+    """
     server_cfg = config.get("server", {})
     video_cfg = config.get("video", {})
     return {
@@ -68,8 +72,6 @@ def merge_settings(config: dict, args: argparse.Namespace) -> dict:
 
         "frame_chunk_size": video_cfg.get("frame_chunk_size", 5),
         "audio_chunk_size": video_cfg.get("audio_chunk_size", 1024),
-
-        "video_file": str(args.video_file.resolve()),
     }
 
 async def main():
@@ -79,16 +81,6 @@ async def main():
 
     config = load_config(args.config)
     settings = merge_settings(config, args)
-
-    video_path = Path(settings["video_file"])
-
-    # Verify that the video_file argument is valid
-    if not video_path.exists():
-        logger.error(f"Video file does not exist: {video_path}")
-        sys.exit(1)
-    if not video_path.is_file():
-        logger.error(f"Video path is not a file: {video_path}")
-        sys.exit(1)
 
     logger.info(f"Starting server with settings: {settings}")
 

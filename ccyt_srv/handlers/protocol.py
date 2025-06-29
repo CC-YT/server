@@ -4,17 +4,19 @@ import tempfile
 import os
 import base64
 import logging
+from pathlib import Path
+from yt_dlp import YoutubeDL
 from websockets.asyncio.server import ServerConnection
 from ccyt_srv.handlers.connection import ConnectionState
 from ccyt_srv.utils.convert import convert_img, parse_video
-from ccyt_srv.utils.types import InitMsg
+from ccyt_srv.utils.types import InitMsg, GetMediaMsg
 
 logger = logging.getLogger(__name__)
 
 # Async task to fill up the queue with frames up to maxsize
 async def process_frames(state: ConnectionState):
     for fn in state.frame_files:
-        framedata = convert_img(os.path.join(state.tmpdir, fn))
+        framedata = convert_img(state.tmpdir / fn)
         await state.frame_queue.put(framedata)
         logger.debug(f"Added processed frame {fn} to frame queue")
     logger.info("Frame processing finished")
@@ -28,25 +30,21 @@ async def handle_init(
     """
     Handles "init" message from a client
 
-    Parse init message, start frame processing,
-    and return the connection state
+    Basically just creates the connection state
     """
     fps = int(data.get("fps"))
     width = int(data.get("width"))
     height = int(data.get("height"))
 
-    tmpdir = tempfile.mkdtemp(prefix="ccyt.")
+    tmpdir = Path(tempfile.mkdtemp(prefix="ccyt."))
     logger.info(f"Created temp directory for connection: {tmpdir}")
 
-    parse_video(settings.get("video_file"), width, height, fps, tmpdir)
-
     state = ConnectionState(tmpdir,width,height,fps,settings)
-    asyncio.create_task(process_frames(state)) # Begin the process_frames task
-    
-    logger.info(f"Sending ready packet to {ws.remote_address[0]}")
-    await ws.send(json.dumps({
-        "type": "ready"
-    }))
+    logger.info(f"Created connection state")
+    #logger.info(f"Telling client that the server is initialized")
+    #await ws.send(json.dumps({
+    #    "type": "init_done"
+    #}))
     return state
 
 async def handle_get_frames(
@@ -113,3 +111,69 @@ async def handle_get_audio(
         await ws.send(json.dumps({
             "type": "audio_end",
         }))
+
+async def handle_get_media(
+    ws: ServerConnection,
+    data: GetMediaMsg,
+    state: ConnectionState,
+    settings: dict
+) -> None:
+    """
+    Handles "get_media" message from the client
+
+    Uses yt-dlp to download the video url from youtube
+    """
+    if not (url := data.get("url")):
+        logger.warning("Get_Media request had no url")
+        await ws.send(json.dumps({
+            "type": "error",
+            "message": "Missing url in get_media request"
+        }))
+        return
+    
+    logger.info(f"Received get_media request for URL: {url}")
+    
+    # Make the output directory if it doesn't yet exist
+    output_dir = state.tmpdir / "media"
+    output_dir.mkdir(parents=True,exist_ok=True)
+    
+    video_path = output_dir / "video.mp4"
+
+    ydl_opts = {
+        "format": "worstvideo[ext=mp4]+worstaudio[ext=m4a]/worst[ext=mp4]/worst",
+        "outtmpl": str(video_path),
+        "quiet": True,
+        "no_warnings": False,
+        "merge_output_format": "mp4"
+    }
+
+    def download():
+        with YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+    
+    try:
+        # Offload blocking function, download, to a background thread
+        # so it doesn't block the event loop
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None,download)
+    except Exception as e:
+        logger.exception("Error downloading media")
+        await ws.send(json.dumps({
+            "type": "error",
+            "message": f"Download failed: {str(e)}"
+        }))
+        return
+    logger.info(f"Download complete, notifying client")
+
+    # Update the connection state
+    state.video_file = video_path
+
+    state.frame_files = parse_video(state.video_file, state.width, state.height, state.fps, state.tmpdir)
+
+    logger.info(f"Beginning process frames task for {ws.remote_address[0]}")
+    asyncio.create_task(process_frames(state)) # Begin the process_frames task
+
+    # Tell the client that the server is ready for streaming
+    await ws.send(json.dumps({
+        "type": "ready"
+    }))
