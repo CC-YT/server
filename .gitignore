@@ -1,0 +1,23 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+.venv/
+env/
+venv/
+
+# Environment variables
+.env
+*.env
+
+# Logs and runtime files
+*.log
+server.log
+
+# Video stuff
+*.mp4
+*.webm
+*.wav
+*.dfpwm

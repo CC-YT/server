@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ccyt-server"
+version = "0.1.0"
+description = "A server that streams YouTube videos and audio to CC:Tweaked over WebSockets."
+authors = [
+    { name="Brayden McGill", email="brayden@mobilebayarea.com" }
+]
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "asyncio==3.4.3",
+    "cffi==1.17.1",
+    "dfpwm==0.2.0",
+    "numpy==2.3.1",
+    "pillow==11.2.1",
+    "pycparser==2.22",
+    "PyYAML==6.0.2",
+    "soundfile==0.13.1",
+    "websockets==15.0.1",
+    "yt-dlp==2025.6.25"
+]
+
+[project.scripts]
+ccyt-server = "ytserver.__main__:main"
