@@ -4,6 +4,7 @@ import tempfile
 import os
 import base64
 import logging
+import shutil
 from pathlib import Path
 from yt_dlp import YoutubeDL
 from websockets.asyncio.server import ServerConnection
@@ -20,7 +21,7 @@ async def process_frames(state: ConnectionState):
         await state.frame_queue.put(framedata)
         logger.debug(f"Added processed frame {fn} to frame queue")
     logger.info("Frame processing finished")
-    await state.frame_queue.put("Done") # Signifies that the processing is done
+    await state.frame_queue.put(None) # Signifies that the processing is done
 
 async def handle_init(
     ws: ServerConnection,
@@ -41,10 +42,7 @@ async def handle_init(
 
     state = ConnectionState(tmpdir,width,height,fps,settings)
     logger.info(f"Created connection state")
-    #logger.info(f"Telling client that the server is initialized")
-    #await ws.send(json.dumps({
-    #    "type": "init_done"
-    #}))
+
     return state
 
 async def handle_get_frames(
@@ -64,7 +62,7 @@ async def handle_get_frames(
     chunk = []
     for _ in range(state.f_chunk):
         frame = await state.frame_queue.get()
-        if frame == "Done":
+        if frame == None:
             await ws.send(json.dumps({
                 "type": "frames_end",
             }))
@@ -136,12 +134,10 @@ async def handle_get_media(
     # Make the output directory if it doesn't yet exist
     output_dir = state.tmpdir / "media"
     output_dir.mkdir(parents=True,exist_ok=True)
-    
-    video_path = output_dir / "video.mp4"
 
     ydl_opts = {
-        "format": "worstvideo[ext=mp4]+worstaudio[ext=m4a]/worst[ext=mp4]/worst",
-        "outtmpl": str(video_path),
+        "format": "worst[ext=mp4]/worst",
+        "outtmpl": str(output_dir / "video.%(ext)s"),
         "quiet": True,
         "no_warnings": False,
         "merge_output_format": "mp4"
@@ -165,15 +161,62 @@ async def handle_get_media(
         return
     logger.info(f"Download complete, notifying client")
 
-    # Update the connection state
-    state.video_file = video_path
+    # Find the video file (since extension may not be mp4)
+    for file in output_dir.iterdir():
+        if file.name.startswith("video.") and file.is_file():
+            state.video_file = file
+            break
+    else:
+        raise FileNotFoundError("Failed to find downloaded video file")
 
     state.frame_files = parse_video(state.video_file, state.width, state.height, state.fps, state.tmpdir)
 
     logger.info(f"Beginning process frames task for {ws.remote_address[0]}")
-    asyncio.create_task(process_frames(state)) # Begin the process_frames task
+    state.frame_task = asyncio.create_task(process_frames(state)) # Begin the process_frames task
 
     # Tell the client that the server is ready for streaming
     await ws.send(json.dumps({
         "type": "ready"
     }))
+
+async def handle_stop(
+    ws: ServerConnection,
+    state: ConnectionState,
+    settings: dict
+) -> None:
+    """
+    Handles "stop" packet from the client.
+
+    Clears all of the queues and files for the currently playing video,
+    so another video can be played without interference.
+    """
+    if not state:
+        return
+    logger.info(f"Received stop request, resetting state for {ws.remote_address[0]}")
+
+    # Stop the frames_task if it's running
+    if state.frame_task and not state.frame_task.done():
+        state.frame_task.cancel()
+        try:
+            await state.frame_task
+        except:
+            logger.info("Frame task cancelled")
+
+    # Delete the old tmpdir
+    logger.info("Deleting tmpdir")
+    try:
+        shutil.rmtree(state.tmpdir, ignore_errors=True)
+    except Exception as e:
+        logger.warning(f"Failed to delete tmpdir: {e}")
+    
+    # Reuse resolution and fps from previous state
+    new_tmpdir = Path(tempfile.mkdtemp(prefix="ccyt."))
+    logger.info(f"Created new tmpdir: {new_tmpdir}")
+
+    return ConnectionState(
+        tmpdir=new_tmpdir,
+        width=state.width,
+        height=state.height,
+        fps=state.fps,
+        settings=settings
+    )

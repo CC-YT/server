@@ -66,7 +66,7 @@ def merge_settings(config: dict, args: argparse.Namespace) -> dict:
     video_cfg = config.get("video", {})
     return {
         "host": args.host or server_cfg.get("host", "0.0.0.0"),
-        "port": args.port or server_cfg.get("port", "5000"),
+        "port": args.port or int(server_cfg.get("port", "5000")),
         "compression": "deflate" if server_cfg.get("compression") else None,
         "max_queue": server_cfg.get("max_queue", 3),
 

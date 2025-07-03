@@ -22,12 +22,13 @@ class ConnectionState:
         self.f_chunk = settings["frame_chunk_size"]
 
         self.frame_queue = asyncio.Queue(maxsize=settings["max_queue"]*self.f_chunk)
+        self.frame_task = None
 
         self.audio_path = tmpdir / "audio.dfpwm"
         self.a_chunk = settings["audio_chunk_size"]
         self.audio_offset = 0
 
-from ccyt_srv.handlers.protocol import handle_init, handle_get_media, handle_get_frames, handle_get_audio
+from ccyt_srv.handlers.protocol import handle_get_audio, handle_get_frames, handle_get_media, handle_init, handle_stop
 
 async def handle_connection(
     websocket: ServerConnection,
@@ -47,6 +48,8 @@ async def handle_connection(
             except json.JSONDecodeError:
                 logger.warning("Received invalid JSON or incorrectly formatted packet")
                 continue # Stop current iteration and start over
+
+            # Packet handling
             match data.get("type"):
                 case "init":
                     logger.info(f"Initalizing connection: {addr}")
@@ -57,8 +60,12 @@ async def handle_connection(
                     await handle_get_audio(websocket, state)
                 case "get_media":
                     await handle_get_media(websocket, data, state, settings)
+                case "stop":
+                    state = await handle_stop(websocket,state,settings)
                 case _:
                     logger.warning(f"Unknown message type: {data.get('type')}")
+    
+    # ERROR Dectection for good error logging
     except ConnectionClosedOK:
         logger.info(f"Client {addr} closed the connection.")
     except ConnectionClosedError as e:

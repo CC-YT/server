@@ -16,4 +16,7 @@ class GetMediaMsg(TypedDict):
     type: Literal["get_media"]
     url: str
 
-Message = InitMsg | GetFramesMsg | GetAudioMsg | GetMediaMsg
+class StopMsg(TypedDict):
+    type: Literal["stop"]
+
+Message = InitMsg | GetFramesMsg | GetAudioMsg | GetMediaMsg | StopMsg
