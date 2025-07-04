@@ -22,13 +22,16 @@ class ConnectionState:
         self.f_chunk = settings["frame_chunk_size"]
 
         self.frame_queue = asyncio.Queue(maxsize=settings["max_queue"]*self.f_chunk)
+        self.current_frame = 0
         self.frame_task = None
 
         self.audio_path = tmpdir / "audio.dfpwm"
         self.a_chunk = settings["audio_chunk_size"]
         self.audio_offset = 0
+        self.audio_duration = 0
+        self.audio_bytes = 0
 
-from ccyt_srv.handlers.protocol import handle_get_audio, handle_get_frames, handle_get_media, handle_init, handle_stop
+from ccyt_srv.handlers.protocol import *
 
 async def handle_connection(
     websocket: ServerConnection,
@@ -62,6 +65,8 @@ async def handle_connection(
                     await handle_get_media(websocket, data, state, settings)
                 case "stop":
                     state = await handle_stop(websocket,state,settings)
+                case "seek":
+                    await handle_seek(websocket, data, state)
                 case _:
                     logger.warning(f"Unknown message type: {data.get('type')}")
     

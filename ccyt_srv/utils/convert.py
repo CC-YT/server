@@ -58,7 +58,13 @@ def parse_video(path, width: int, height: int, fps: int, output_dir):
     with open(str(output_dir / "audio.dfpwm"), "wb") as out:
         out.write(dfpwm_bytes)
 
-    return sorted(f for f in os.listdir(output_dir) if f.endswith(".png"))
+    frame_files = sorted(f for f in os.listdir(output_dir) if f.endswith(".png"))
+
+    # Duration and audio bytes are needed for audio seeking
+    return frame_files, {
+        "duration": len(data)/sample_rate,
+        "audio_bytes": len(dfpwm_bytes)
+    }
 
 def convert_img(path):
     img = Image.open(path).convert("RGB")

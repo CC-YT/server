@@ -10,13 +10,13 @@ from yt_dlp import YoutubeDL
 from websockets.asyncio.server import ServerConnection
 from ccyt_srv.handlers.connection import ConnectionState
 from ccyt_srv.utils.convert import convert_img, parse_video
-from ccyt_srv.utils.types import InitMsg, GetMediaMsg
+from ccyt_srv.utils.types import InitMsg, GetMediaMsg, SeekMsg
 
 logger = logging.getLogger(__name__)
 
 # Async task to fill up the queue with frames up to maxsize
 async def process_frames(state: ConnectionState):
-    for fn in state.frame_files:
+    for fn in state.frame_files[state.current_frame:]:
         framedata = convert_img(state.tmpdir / fn)
         await state.frame_queue.put(framedata)
         logger.debug(f"Added processed frame {fn} to frame queue")
@@ -143,15 +143,15 @@ async def handle_get_media(
         "merge_output_format": "mp4"
     }
 
-    def download():
+    def download() -> dict:
         with YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+            return ydl.extract_info(url, download=True)
     
     try:
         # Offload blocking function, download, to a background thread
         # so it doesn't block the event loop
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None,download)
+        info = await loop.run_in_executor(None,download)
     except Exception as e:
         logger.exception("Error downloading media")
         await ws.send(json.dumps({
@@ -169,14 +169,31 @@ async def handle_get_media(
     else:
         raise FileNotFoundError("Failed to find downloaded video file")
 
-    state.frame_files = parse_video(state.video_file, state.width, state.height, state.fps, state.tmpdir)
+    state.frame_files, audio_meta = parse_video(
+        state.video_file,
+        state.width,
+        state.height,
+        state.fps,
+        state.tmpdir
+    )
+
+    state.audio_duration = audio_meta["duration"]
+    state.audio_bytes = audio_meta["audio_bytes"]
 
     logger.info(f"Beginning process frames task for {ws.remote_address[0]}")
     state.frame_task = asyncio.create_task(process_frames(state)) # Begin the process_frames task
 
     # Tell the client that the server is ready for streaming
     await ws.send(json.dumps({
-        "type": "ready"
+        "type": "ready",
+    }))
+
+    # Send video metadata to the client
+    logger.info("Sending metadata to client")
+    await ws.send(json.dumps({
+        "type": "metadata",
+        "title": info["title"],
+        "duration": info["duration"]
     }))
 
 async def handle_stop(
@@ -220,3 +237,40 @@ async def handle_stop(
         fps=state.fps,
         settings=settings
     )
+
+
+async def handle_seek(
+    ws: ServerConnection,
+    data: SeekMsg,
+    state: ConnectionState
+) -> None:
+    """
+    Handles "seek" packet from the client.
+    """
+    seek_time = max(data.get("time", 0),0) # Prevent negative seek_times
+    logger.info(f"Seeking to {seek_time:.2f}s")
+
+    # Stop the frames_task if it's running
+    if state.frame_task and not state.frame_task.done():
+        state.frame_task.cancel()
+        try:
+            await state.frame_task
+        except:
+            logger.info("Frame task cancelled")
+
+    # Clear the frame queue
+    state.frame_queue = asyncio.Queue(maxsize=state.frame_queue.maxsize)
+
+    # Update offsets
+    state.current_frame = int(seek_time * state.fps)
+
+    offset = int((seek_time/ state.audio_duration)*state.audio_bytes)
+    state.audio_offset = min(offset, state.audio_bytes)
+
+    # Begin the process_frames task
+    state.frame_task = asyncio.create_task(process_frames(state))
+
+    logger.info("Seek ready")
+    await ws.send(json.dumps({
+        "type": "seek_ready"
+    }))

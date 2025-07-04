@@ -19,4 +19,8 @@ class GetMediaMsg(TypedDict):
 class StopMsg(TypedDict):
     type: Literal["stop"]
 
-Message = InitMsg | GetFramesMsg | GetAudioMsg | GetMediaMsg | StopMsg
+class SeekMsg(TypedDict):
+    type: Literal["seek"]
+    time: int
+
+Message = InitMsg | GetFramesMsg | GetAudioMsg | GetMediaMsg | StopMsg | SeekMsg
